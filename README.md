@@ -1,4 +1,5 @@
 # multi-free-proxy
+![Python](https://img.shields.io/badge/python-3670A0.svg?style=for-the-badge&logo=python&logoColor=ffdd54)
 
 Collects free proxies from a bunch of public APIs and lists, merges them and
 writes everything to `proxy.txt`. Terminal only, no web UI.
