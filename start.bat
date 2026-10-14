@@ -7,7 +7,7 @@ where python >nul 2>nul
 if errorlevel 1 (
     where py >nul 2>nul
     if errorlevel 1 (
-        echo  [ERROR] Python was not found on this system.
+        echo error: python not found
         pause
         exit /b 1
     )
@@ -21,10 +21,10 @@ if "%ERRORLEVEL%"=="2" goto install
 goto finish
 
 :install
-echo  [!] Missing libraries - installing...
+echo installing requirements...
 %PY% -m pip install -r requirements.txt
 if errorlevel 1 (
-    echo  [ERROR] Could not install libraries.
+    echo error: install failed
     pause
     exit /b 1
 )

@@ -9,11 +9,10 @@ from pathlib import Path
 
 try:
     import requests
-    from colorama import Fore, Style, init as colorama_init
 except ImportError as exc:
-    print(f"[ERROR] Missing Python library: {getattr(exc, 'name', None) or exc}")
-    print("        Run start.bat again or: python -m pip install -r requirements.txt")
-    sys.exit(2)  # start.bat installs requirements when it sees this exit code
+    print(f"error: missing library: {getattr(exc, 'name', None) or exc}")
+    print("run start.bat or: python -m pip install -r requirements.txt")
+    sys.exit(2)
 
 from sources import (
     ANONYMITY_LEVELS,
@@ -29,15 +28,6 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = PROJECT_DIR / "proxy.txt"
 REQUEST_TIMEOUT = 15
 MAX_WORKERS = 12
-
-C = {
-    "head": Fore.CYAN,
-    "ok": Fore.GREEN,
-    "warn": Fore.YELLOW,
-    "err": Fore.RED,
-    "dim": Style.DIM,
-    "reset": Style.RESET_ALL,
-}
 
 _thread_local = threading.local()
 
@@ -61,8 +51,8 @@ class Settings:
 
     def describe(self) -> str:
         return (
-            f"protocol: {self.protocol or 'all'} | anonymity: {self.anonymity or 'all'} "
-            f"| country: {self.country or 'all'} | bulk pools: {'on' if self.bulk else 'off'}"
+            f"protocol={self.protocol or 'all'} | anonymity={self.anonymity or 'all'} "
+            f"| country={self.country or 'all'} | bulk={'on' if self.bulk else 'off'}"
         )
 
 
@@ -91,13 +81,14 @@ def url_tag(url: str) -> str:
 def run_download(s: Settings) -> None:
     jobs = select_sources(s)
     if not jobs:
-        print(f"{C['err']}[!] No source supports this filter combination.{C['reset']}")
-        print("    Try relaxing anonymity/country, or enable bulk pools.")
+        print("error: no source matches these filters")
+        print("relax anonymity/country or enable bulk pools")
         return
 
     url_count = sum(len(u) for _, u in jobs)
-    print(f"\n{C['head']}Downloading from {len(jobs)} sources ({url_count} requests)...{C['reset']}")
-    print(f"{C['dim']}    filters -> {s.describe()}{C['reset']}\n")
+    print(f"{len(jobs)} sources / {url_count} requests")
+    print(s.describe())
+    print()
 
     results: dict[str, list[str]] = {}
     raw_total = 0
@@ -115,11 +106,11 @@ def run_download(s: Settings) -> None:
             try:
                 proxies = fut.result()
             except Exception as exc:
-                print(f"  {C['err']}[-]{C['reset']} {label:<28} failed ({type(exc).__name__})")
+                print(f"  {label:<30}{'failed (' + type(exc).__name__ + ')':>24}")
                 continue
             results[url] = proxies
             raw_total += len(proxies)
-            print(f"  {C['ok']}[+]{C['reset']} {label:<28} {len(proxies):>7,} proxies")
+            print(f"  {label:<30}{len(proxies):>24,}")
 
     merged = dict.fromkeys(
         proxy for _, urls in jobs for url in urls for proxy in results.get(url, ())
@@ -129,33 +120,25 @@ def run_download(s: Settings) -> None:
         key=lambda p: (tuple(int(x) for x in p.split(":")[0].split(".")), int(p.split(":")[1])),
     )
 
-    print(f"\n{C['dim']}{'-' * 52}{C['reset']}")
+    print()
     if not proxies:
-        print(f"{C['warn']}[!] No proxies found - output file not written.{C['reset']}")
+        print("no proxies found, output not written")
         return
 
     s.output.write_text("\n".join(proxies) + "\n", encoding="utf-8")
-    print(f"  {C['ok']}unique: {len(proxies):,}{C['reset']} "
-          f"(raw {raw_total:,})   time: {time.time() - t0:.1f}s")
-    print(f"  saved -> {C['head']}{s.output}{C['reset']}")
-
-
-def banner() -> None:
-    print(C["head"] + "=" * 52)
-    print("  Multi-Free-Proxy  -  free proxies from multiple sources")
-    print("=" * 52 + C["reset"])
+    print(f"unique {len(proxies):,} (raw {raw_total:,}) in {time.time() - t0:.1f}s")
+    print(f"saved: {s.output}")
 
 
 def ask(prompt: str) -> str:
     try:
         return input(prompt).strip().lower()
     except (EOFError, KeyboardInterrupt):
-        print()
         sys.exit(0)
 
 
 def pick_option(title: str, options: list[tuple[str | None, str]], current: str | None) -> str | None:
-    print(f"\n{C['head']}{title}{C['reset']}")
+    print(f"\n{title}")
     for i, (_, label) in enumerate(options, 1):
         print(f"  [{i}] {label}")
     choice = ask("> ")
@@ -165,23 +148,22 @@ def pick_option(title: str, options: list[tuple[str | None, str]], current: str 
         return None
     if choice.isdigit() and 1 <= int(choice) <= len(options):
         return options[int(choice) - 1][0]
-    print(f"{C['warn']}  keeping previous value{C['reset']}")
+    print("invalid, unchanged")
     return current
 
 
 def set_protocol(s: Settings) -> None:
-    opts = [(p, p) for p in ("http", "https", "socks4", "socks5")] + [(None, "all protocols")]
-    s.protocol = pick_option("Protocol:", opts, s.protocol)
+    opts = [(p, p) for p in ("http", "https", "socks4", "socks5")] + [(None, "all")]
+    s.protocol = pick_option("protocol:", opts, s.protocol)
 
 
 def set_anonymity(s: Settings) -> None:
-    opts = [(a, a) for a in ("elite", "anonymous", "transparent")] + [(None, "all levels")]
-    s.anonymity = pick_option("Anonymity:", opts, s.anonymity)
+    opts = [(a, a) for a in ("elite", "anonymous", "transparent")] + [(None, "all")]
+    s.anonymity = pick_option("anonymity:", opts, s.anonymity)
 
 
 def set_country(s: Settings) -> None:
-    print(f"\n{C['head']}Country:{C['reset']}")
-    print("  ISO-2 code (us, de, kz ...)  |  'all' for every country")
+    print("\ncountry (ISO-2 code, 'all' for everything):")
     code = ask("> ")
     if not code:
         return
@@ -190,31 +172,29 @@ def set_country(s: Settings) -> None:
     elif len(code) == 2 and code.isalpha():
         s.country = code
     else:
-        print(f"{C['warn']}  invalid country code, keeping previous value{C['reset']}")
+        print("invalid, unchanged")
 
 
 def show_sources(s: Settings) -> None:
-    print(f"\n{C['head']}Sources:{C['reset']}")
     active = {id(src) for src, _ in select_sources(s)}
+    print()
     for src in SOURCES:
-        mark = f"{C['ok']}on " if id(src) in active else f"{C['dim']}-- "
-        tag = " [bulk]" if src.bulk else ""
-        print(f"  {mark}{C['reset']} {src.name:<22} {src.note}{tag}")
-    print(f"\n  {C['dim']}sources matching current filters: "
-          f"{len(active)}/{len(SOURCES)}{C['reset']}")
+        mark = "on " if id(src) in active else "off"
+        print(f"  {mark}  {src.name:<22}{src.note}")
+    print(f"\nsources matching filters: {len(active)}/{len(SOURCES)}")
 
 
 def menu_loop(s: Settings) -> None:
     while True:
-        print(f"\n{C['dim']}{s.describe()}{C['reset']}")
-        print("  [1] Download proxies")
-        print("  [2] Protocol")
-        print("  [3] Anonymity")
-        print("  [4] Country")
-        print(f"  [5] Bulk pools      {'(on)' if s.bulk else '(off)'}")
-        print("  [6] List sources")
-        print("  [0] Exit")
-        choice = ask(f"\n{C['head']}>{C['reset']} ")
+        print(f"\n{s.describe()}")
+        print("  [1] download")
+        print("  [2] protocol")
+        print("  [3] anonymity")
+        print("  [4] country")
+        print(f"  [5] bulk pools ({'on' if s.bulk else 'off'})")
+        print("  [6] sources")
+        print("  [0] exit")
+        choice = ask("> ")
 
         if choice == "1":
             run_download(s)
@@ -229,10 +209,9 @@ def menu_loop(s: Settings) -> None:
         elif choice == "6":
             show_sources(s)
         elif choice in ("0", "q", "quit", "exit"):
-            print("bye")
             return
         else:
-            print(f"{C['warn']}  unknown option{C['reset']}")
+            print("invalid, unchanged")
 
 
 def parse_args() -> argparse.Namespace:
@@ -248,9 +227,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    colorama_init(autoreset=True)
-    banner()
-
     s = Settings()
     if args.protocol:
         s.protocol = args.protocol
@@ -259,7 +235,7 @@ def main() -> int:
     if args.country:
         code = args.country.strip().lower()
         if len(code) != 2 or not code.isalpha():
-            print(f"{C['err']}[!] --country expects a 2-letter ISO code{C['reset']}")
+            print("error: --country expects a 2-letter ISO code")
             return 1
         s.country = code
     if args.bulk:
@@ -278,5 +254,4 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\ninterrupted")
-        sys.exit(0)
+        sys.exit(1)
