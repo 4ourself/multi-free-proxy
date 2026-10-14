@@ -12,9 +12,9 @@ writes everything to `proxy.txt`. Terminal only, no web UI.
 On Windows just double-click `start.bat`. On anything else:
 
     python -m pip install -r requirements.txt
-    python main.py
+    python src/main.py
 
-`start.bat` always runs `python main.py` first. It installs `requirements.txt`
+`start.bat` always runs `src/main.py` first. It installs `requirements.txt`
 only when python exits with code 2 (missing library) and then starts the app
 again. If the app runs fine, nothing gets installed.
 
@@ -31,8 +31,8 @@ shows which ones are active at the moment.
 
 If you don't want the menu there's a CLI too:
 
-    python main.py --protocol socks5 --anonymity elite --country us
-    python main.py --protocol https --bulk --output my_proxies.txt
+    python src/main.py --protocol socks5 --anonymity elite --country us
+    python src/main.py --protocol https --bulk --output my_proxies.txt
 
 ## Output
 
@@ -67,14 +67,21 @@ Checked on 2026-10-14, all of these were alive:
 There are tons of other free proxy sites out there. Most of the rest are
 HTML-only (spys.one, hidemy.name, freeproxy.world, ...) or plain dead
 (pubproxy.com, proxy-list.download), so they're not in here. Adding a source
-is one entry in `sources.py`.
+is one entry in `src/sources.py`.
 
-## Tests
+## Layout
 
-    python -m pip install -r requirements-dev.txt
-    python -m pytest
-
-`tools/make_screenshots.py` rebuilds the two terminal screenshots above.
+    multi-free-proxy/
+    ├── README.md
+    ├── LICENSE
+    ├── start.bat
+    ├── requirements.txt
+    ├── images/          screenshots for this readme
+    │   ├── menu.png
+    │   └── download.png
+    └── src/
+        ├── main.py      terminal UI + downloader
+        └── sources.py   source registry
 
 ## License
 

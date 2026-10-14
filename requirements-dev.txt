@@ -1,4 +1,0 @@
--r requirements.txt
-pytest>=7.0
-pyte>=0.8.2
-pillow>=9.0

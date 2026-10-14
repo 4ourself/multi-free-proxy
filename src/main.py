@@ -1,35 +1,21 @@
 #!/usr/bin/env python3
-"""
-Multi-Free-Proxy
-================
-Downloads free proxies (HTTP / HTTPS / SOCKS4 / SOCKS5) from multiple
-public sources (APIs + community lists), merges and deduplicates them,
-and saves the result to `proxy.txt` in this folder.
-
-Start with:  python main.py      (or double-click start.bat on Windows)
-CLI usage:   python main.py --protocol socks5 --anonymity elite --country us
-"""
-
-from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# --- library check: exit code 2 tells start.bat to install requirements ---
 try:
     import requests
     from colorama import Fore, Style, init as colorama_init
 except ImportError as exc:
-    missing = getattr(exc, "name", None) or str(exc)
-    print(f"[ERROR] Missing Python library: {missing}")
-    print("        Run start.bat again - it will install the requirements,")
-    print("        or install manually:  python -m pip install -r requirements.txt")
-    sys.exit(2)
+    print(f"[ERROR] Missing Python library: {getattr(exc, 'name', None) or exc}")
+    print("        Run start.bat again or: python -m pip install -r requirements.txt")
+    sys.exit(2)  # start.bat installs requirements when it sees this exit code
 
-from sources import (  # noqa: E402
+from sources import (
     ANONYMITY_LEVELS,
     PROTOCOLS,
     SOURCES,
@@ -39,10 +25,10 @@ from sources import (  # noqa: E402
     extract_proxies,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_OUTPUT = BASE_DIR / "proxy.txt"
-REQUEST_TIMEOUT = 15          # seconds per source request
-MAX_WORKERS = 12              # parallel downloads
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_OUTPUT = PROJECT_DIR / "proxy.txt"
+REQUEST_TIMEOUT = 15
+MAX_WORKERS = 12
 
 C = {
     "head": Fore.CYAN,
@@ -53,34 +39,35 @@ C = {
     "reset": Style.RESET_ALL,
 }
 
+_thread_local = threading.local()
 
-# --------------------------------------------------------------------------
-# settings
-# --------------------------------------------------------------------------
+
+def session() -> requests.Session:
+    sess = getattr(_thread_local, "sess", None)
+    if sess is None:
+        sess = requests.Session()
+        sess.headers["User-Agent"] = USER_AGENT
+        _thread_local.sess = sess
+    return sess
+
 
 class Settings:
     def __init__(self) -> None:
-        self.protocol: str | None = "http"   # None = all
-        self.anonymity: str | None = None    # None = all
-        self.country: str | None = None      # None = all
+        self.protocol: str | None = "http"
+        self.anonymity: str | None = None
+        self.country: str | None = None
         self.bulk: bool = False
         self.output: Path = DEFAULT_OUTPUT
 
     def describe(self) -> str:
-        proto = self.protocol or "all"
-        anon = self.anonymity or "all"
-        country = self.country or "all"
-        bulk = "on" if self.bulk else "off"
-        return f"protocol: {proto} | anonymity: {anon} | country: {country} | bulk pools: {bulk}"
+        return (
+            f"protocol: {self.protocol or 'all'} | anonymity: {self.anonymity or 'all'} "
+            f"| country: {self.country or 'all'} | bulk pools: {'on' if self.bulk else 'off'}"
+        )
 
-
-# --------------------------------------------------------------------------
-# fetching
-# --------------------------------------------------------------------------
 
 def select_sources(s: Settings) -> list[tuple[Source, list[str]]]:
-    """Return (source, urls) pairs whose builders accept the current filters."""
-    chosen: list[tuple[Source, list[str]]] = []
+    chosen = []
     for src in SOURCES:
         if src.bulk and not s.bulk:
             continue
@@ -91,13 +78,12 @@ def select_sources(s: Settings) -> list[tuple[Source, list[str]]]:
 
 
 def fetch_one(url: str, kind: str) -> list[str]:
-    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
+    resp = session().get(url, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     return extract_geonode(resp.text) if kind == "geonode" else extract_proxies(resp.text)
 
 
 def url_tag(url: str) -> str:
-    """Short label for a URL, e.g. .../http/data.txt -> 'http', .../socks5.txt -> 'socks5'."""
     parts = url.rstrip("/").split("/")
     return parts[-2] if parts[-1] in ("data.txt", "proxy.txt", "all.txt") else parts[-1]
 
@@ -106,21 +92,21 @@ def run_download(s: Settings) -> None:
     jobs = select_sources(s)
     if not jobs:
         print(f"{C['err']}[!] No source supports this filter combination.{C['reset']}")
-        print(f"    Try relaxing anonymity/country, or enable bulk pools.")
+        print("    Try relaxing anonymity/country, or enable bulk pools.")
         return
 
     url_count = sum(len(u) for _, u in jobs)
     print(f"\n{C['head']}Downloading from {len(jobs)} sources ({url_count} requests)...{C['reset']}")
     print(f"{C['dim']}    filters -> {s.describe()}{C['reset']}\n")
 
-    results: dict[str, tuple[str, list[str]]] = {}   # url -> (label, proxies)
+    results: dict[str, list[str]] = {}
     raw_total = 0
     t0 = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         future_map = {}
         for src, urls in jobs:
-            for i, url in enumerate(urls):
+            for url in urls:
                 label = src.name if len(urls) == 1 else f"{src.name} [{url_tag(url)}]"
                 future_map[pool.submit(fetch_one, url, src.kind)] = (label, url)
 
@@ -129,40 +115,30 @@ def run_download(s: Settings) -> None:
             try:
                 proxies = fut.result()
             except Exception as exc:
-                reason = type(exc).__name__
-                print(f"  {C['err']}[-]{C['reset']} {label:<28} failed ({reason})")
+                print(f"  {C['err']}[-]{C['reset']} {label:<28} failed ({type(exc).__name__})")
                 continue
-            results[url] = (label, proxies)
+            results[url] = proxies
             raw_total += len(proxies)
             print(f"  {C['ok']}[+]{C['reset']} {label:<28} {len(proxies):>7,} proxies")
 
-    # merge in registry order -> deterministic, deduplicated, sorted
-    merged: dict[str, None] = {}
-    for src, urls in jobs:
-        for url in urls:
-            for proxy in results.get(url, (None, []))[1]:
-                merged.setdefault(proxy, None)
-
+    merged = dict.fromkeys(
+        proxy for _, urls in jobs for url in urls for proxy in results.get(url, ())
+    )
     proxies = sorted(
         merged,
         key=lambda p: (tuple(int(x) for x in p.split(":")[0].split(".")), int(p.split(":")[1])),
     )
 
-    elapsed = time.time() - t0
     print(f"\n{C['dim']}{'-' * 52}{C['reset']}")
     if not proxies:
         print(f"{C['warn']}[!] No proxies found - output file not written.{C['reset']}")
         return
 
     s.output.write_text("\n".join(proxies) + "\n", encoding="utf-8")
-    print(f"  {C['ok']}unique: {len(proxies):,}{C['reset']} (raw {raw_total:,})   "
-          f"time: {elapsed:.1f}s")
+    print(f"  {C['ok']}unique: {len(proxies):,}{C['reset']} "
+          f"(raw {raw_total:,})   time: {time.time() - t0:.1f}s")
     print(f"  saved -> {C['head']}{s.output}{C['reset']}")
 
-
-# --------------------------------------------------------------------------
-# terminal UI
-# --------------------------------------------------------------------------
 
 def banner() -> None:
     print(C["head"] + "=" * 52)
@@ -179,7 +155,6 @@ def ask(prompt: str) -> str:
 
 
 def pick_option(title: str, options: list[tuple[str | None, str]], current: str | None) -> str | None:
-    """options: list of (value, label). Returns the chosen value (None = all)."""
     print(f"\n{C['head']}{title}{C['reset']}")
     for i, (_, label) in enumerate(options, 1):
         print(f"  [{i}] {label}")
@@ -260,10 +235,6 @@ def menu_loop(s: Settings) -> None:
             print(f"{C['warn']}  unknown option{C['reset']}")
 
 
-# --------------------------------------------------------------------------
-# entry point
-# --------------------------------------------------------------------------
-
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="Download free proxies from multiple sources into proxy.txt.")
@@ -296,8 +267,7 @@ def main() -> int:
     if args.output:
         s.output = args.output
 
-    cli_mode = any([args.protocol, args.anonymity, args.country, args.bulk, args.output])
-    if cli_mode:
+    if any([args.protocol, args.anonymity, args.country, args.bulk, args.output]):
         run_download(s)
     else:
         menu_loop(s)
