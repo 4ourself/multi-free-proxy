@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import random
 import sys
 import threading
 import time
@@ -47,12 +48,14 @@ class Settings:
         self.anonymity: str | None = None
         self.country: str | None = None
         self.bulk: bool = False
+        self.randomize: bool = False
         self.output: Path = DEFAULT_OUTPUT
 
     def describe(self) -> str:
         return (
             f"protocol={self.protocol or 'all'} | anonymity={self.anonymity or 'all'} "
-            f"| country={self.country or 'all'} | bulk={'on' if self.bulk else 'off'}"
+            f"| country={self.country or 'all'} | bulk={'on' if self.bulk else 'off'} "
+            f"| random={'on' if self.randomize else 'off'}"
         )
 
 
@@ -125,10 +128,12 @@ def run_download(s: Settings) -> None:
         print("no proxies found, output not written")
         return
 
+    if s.randomize:
+        random.shuffle(proxies)
+
     s.output.write_text("\n".join(proxies) + "\n", encoding="utf-8")
     print(f"unique {len(proxies):,} (raw {raw_total:,}) in {time.time() - t0:.1f}s")
     print(f"saved: {s.output}")
-
 
 def ask(prompt: str) -> str:
     try:
@@ -148,6 +153,9 @@ def pick_option(title: str, options: list[tuple[str | None, str]], current: str 
         return None
     if choice.isdigit() and 1 <= int(choice) <= len(options):
         return options[int(choice) - 1][0]
+    for value, label in options:
+        if choice == label or (value is not None and choice == value):
+            return value
     print("invalid, unchanged")
     return current
 
@@ -185,6 +193,10 @@ def show_sources(s: Settings) -> None:
 
 
 def menu_loop(s: Settings) -> None:
+    aliases = {
+        "download": "1", "protocol": "2", "anonymity": "3", "country": "4",
+        "bulk": "5", "randomize": "6", "random": "6", "sources": "7",
+    }
     while True:
         print(f"\n{s.describe()}")
         print("  [1] download")
@@ -192,9 +204,11 @@ def menu_loop(s: Settings) -> None:
         print("  [3] anonymity")
         print("  [4] country")
         print(f"  [5] bulk pools ({'on' if s.bulk else 'off'})")
-        print("  [6] sources")
+        print(f"  [6] randomize ({'on' if s.randomize else 'off'})")
+        print("  [7] sources")
         print("  [0] exit")
         choice = ask("> ")
+        choice = aliases.get(choice, choice)
 
         if choice == "1":
             run_download(s)
@@ -207,6 +221,8 @@ def menu_loop(s: Settings) -> None:
         elif choice == "5":
             s.bulk = not s.bulk
         elif choice == "6":
+            s.randomize = not s.randomize
+        elif choice == "7":
             show_sources(s)
         elif choice in ("0", "q", "quit", "exit"):
             return
@@ -221,6 +237,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--anonymity", choices=sorted(ANONYMITY_LEVELS), help="anonymity level")
     ap.add_argument("--country", help="ISO-2 country code (us, de, kz ...)")
     ap.add_argument("--bulk", action="store_true", help="include huge unchecked pools")
+    ap.add_argument("--random", action="store_true", help="randomize output order")
     ap.add_argument("--output", type=Path, help="output file (default: proxy.txt here)")
     return ap.parse_args()
 
@@ -240,10 +257,12 @@ def main() -> int:
         s.country = code
     if args.bulk:
         s.bulk = True
+    if args.random:
+        s.randomize = True
     if args.output:
         s.output = args.output
 
-    if any([args.protocol, args.anonymity, args.country, args.bulk, args.output]):
+    if any([args.protocol, args.anonymity, args.country, args.bulk, args.random, args.output]):
         run_download(s)
     else:
         menu_loop(s)

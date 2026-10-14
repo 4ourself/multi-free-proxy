@@ -25,19 +25,22 @@ again. If the app runs fine, nothing gets installed.
 - country: 2-letter code (us, de, kz, ...)
 - bulk pools: off by default. Turning this on adds huge unchecked dumps that
   contain a lot of dead proxies.
+- randomize: off by default. Shuffles the output order instead of sorting it.
 
-Sources that can't apply the filters you picked are skipped. Menu option 6
-shows which ones are active at the moment.
+Sources that can't apply the filters you picked are skipped. Menu option 7
+shows which ones are active at the moment. Every prompt takes the number or
+the name, so `socks5`, `elite`, `download` work just as well as `4`, `3`, `1`.
 
 If you don't want the menu there's a CLI too:
 
     python src/main.py --protocol socks5 --anonymity elite --country us
+    python src/main.py --protocol http --random
     python src/main.py --protocol https --bulk --output my_proxies.txt
 
 ## Output
 
 `proxy.txt` in the project folder, one `ip:port` per line, deduplicated and
-sorted.
+sorted. With randomize on the order is shuffled instead.
 
 ## Sources
 
